@@ -11,6 +11,7 @@ import re
 import sys
 import time
 import unicodedata
+import warnings
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -18,7 +19,9 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 UA = "Mozilla/5.0 (akce-praha7 bot; osobni pouziti)"
 OUT_DIR = Path(__file__).parent / "web"
@@ -97,7 +100,12 @@ def parse_cz_range(text: str) -> tuple[date, date | None] | None:
 
 def with_time(d: date, text: str | None) -> str:
     m = re.search(r"(\d{1,2}):(\d{2})", text or "")
-    return f"{d.isoformat()}T{int(m[1]):02d}:{m[2]}" if m else d.isoformat()
+    if not m:
+        return d.isoformat()
+    h, mi = int(m[1]), m[2]
+    if h >= 24:  # "24:00" = konec dne
+        h, mi = 23, "59"
+    return f"{d.isoformat()}T{h:02d}:{mi}"
 
 
 # ---------------------------------------------------------------- adaptéry
@@ -437,31 +445,268 @@ def ntm() -> list[Event]:
     return out
 
 
-def pragueeu() -> list[Event]:
-    """Prague City Tourism – výstavy v celé Praze (stránkování ?pg=)."""
+def _pragueeu_category(slug: str, source: str) -> list[Event]:
+    """Prague City Tourism – kategorie akcí za celou Prahu (vše na jedné stránce)."""
+    s = get(f"https://prague.eu/en/akce-kategorie/{slug}/")
     out = []
-    for pg in range(1, 6):
-        s = get(f"https://prague.eu/en/akce-kategorie/exhibitions/?pg={pg}")
-        tiles = s.select("div.tile-switching")
-        for t in tiles:
-            a = t.select_one("h2 a")
-            p = t.select_one(".tile-switching__main p")
-            d = parse_cz_range(p.get_text()) if p else None
-            if not a or not d:
+    for t in s.select("div.tile-switching"):
+        a = t.select_one("h2 a")
+        p = t.select_one(".tile-switching__main p")
+        d = parse_cz_range(p.get_text()) if p else None
+        if not a or not d:
+            continue
+        venue = t.select_one(".tile-switching__afterHeading")
+        cat = t.select_one(".tile-switching__beforeHeading")
+        single_day = not d[1] or d[1] == d[0]
+        out.append(Event(
+            title=clean(a.get_text()),
+            start=with_time(d[0], p.get_text()) if single_day else d[0].isoformat(),
+            end=None if single_day else d[1].isoformat(),
+            venue=clean(venue.get_text()) if venue else "Praha",
+            url=a["href"],
+            source=source,
+            category=clean(cat.get_text()) if cat else None,
+        ))
+    return out
+
+
+def pragueeu() -> list[Event]:
+    return _pragueeu_category("exhibitions", "pragueeu")
+
+
+def opendays() -> list[Event]:
+    """Dny otevřených dveří – Kramářova vila, Strakova akademie, Senát, Noc vědy, Open House…"""
+    return _pragueeu_category("open-days", "opendays")
+
+
+def festivaly() -> list[Event]:
+    """Festivaly – Den architektury, Designblok, Signal, Vltava Uncovered…"""
+    return _pragueeu_category("festivals-celebrations", "festivaly")
+
+
+def luma() -> list[Event]:
+    """Luma (lu.ma) – tech/AI/startup meetupy v Praze. Stejné API volá jejich web."""
+    r = session.get("https://api.lu.ma/discover/get-paginated-events", timeout=30,
+                    params={"discover_place_api_id": "discplace-6xx9LRci5NFgdJ5", "pagination_limit": 50})
+    r.raise_for_status()
+    out = []
+    for entry in r.json()["entries"]:
+        e = entry["event"]
+        s = datetime.fromisoformat(e["start_at"].replace("Z", "+00:00")).astimezone(PRAGUE)
+        en = datetime.fromisoformat(e["end_at"].replace("Z", "+00:00")).astimezone(PRAGUE) if e.get("end_at") else None
+        geo = e.get("geo_address_info") or {}
+        out.append(Event(
+            title=clean(e["name"]),
+            start=s.strftime("%Y-%m-%dT%H:%M"),
+            end=en.strftime("%Y-%m-%dT%H:%M") if en else None,
+            venue=clean(geo.get("address")) or "Praha",
+            url=f"https://luma.com/{e['url']}",
+            source="luma",
+            category="Meetup",
+        ))
+    return out
+
+
+def camp() -> list[Event]:
+    """CAMP – Centrum architektury a městského plánování: přednášky, komentované prohlídky města."""
+    s = get("https://praha.camp/program")
+    out = []
+    for card in s.find_all("a", href=re.compile(r"^/program/detail/")):
+        title = card.select_one(".card__title")
+        times = [t["datetime"] for t in card.select(".card__info time[datetime]")]
+        days = [x for x in times if re.match(r"20\d\d-\d\d-\d\d", x)]
+        if not title or not days:
+            continue
+        dr = days[0].split("/")
+        hours = next((x for x in times if re.match(r"\d\d:\d\d", x)), None)
+        tags = [clean(t.get_text()) for t in card.select(".card__tags .tag")]
+        start = f"{dr[0]}T{hours[:5]}" if hours and len(dr) == 1 else dr[0]
+        out.append(Event(
+            title=clean(title.get_text(" ")),
+            start=start,
+            end=dr[1] if len(dr) > 1 else (f"{dr[0]}T{hours[6:11]}" if hours and len(hours) >= 11 else None),
+            venue="CAMP",
+            url=urljoin("https://praha.camp/", card["href"]),
+            source="camp",
+            category=tags[0] if tags else None,
+        ))
+    return out
+
+
+def parse_ics(text: str) -> list[dict]:
+    """Minimální parser iCal: vrací VEVENTy jako dict (klíč -> hodnota), časy jako ISO string."""
+    text = re.sub(r"\r?\n[ \t]", "", text)  # rozbalit zalomené řádky
+    out = []
+    for block in text.split("BEGIN:VEVENT")[1:]:
+        f = dict(re.findall(r"^([A-Z-]+)(?:;[^:\n]*)?:(.*?)\r?$", block.split("END:VEVENT")[0], re.M))
+        for k in ("SUMMARY", "LOCATION", "DESCRIPTION"):
+            if k in f:
+                f[k] = clean(f[k].replace("\\,", ",").replace("\\;", ";").replace("\\n", " "))
+        for k in ("DTSTART", "DTEND"):
+            v = f.get(k)
+            if not v:
                 continue
-            venue = t.select_one(".tile-switching__afterHeading")
-            cat = t.select_one(".tile-switching__beforeHeading")
+            if len(v) == 8:  # celodenní
+                f[k] = f"{v[:4]}-{v[4:6]}-{v[6:8]}"
+                continue
+            dt = datetime.strptime(v[:15], "%Y%m%dT%H%M%S")
+            if v.endswith("Z"):
+                dt = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(PRAGUE)
+            f[k] = dt.strftime("%Y-%m-%dT%H:%M")
+        if f.get("DTSTART"):
+            out.append(f)
+    return out
+
+
+def pyvo() -> list[Event]:
+    """Pražské Pyvo – měsíční sraz Python komunity, iCal feed."""
+    r = session.get("https://pyvo.cz/api/pyvo.ics", timeout=30)
+    r.raise_for_status()
+    out = []
+    for f in parse_ics(r.text):
+        summary = f.get("SUMMARY", "")
+        if not summary.startswith("Pražské Pyvo") or "nepotvrzeno" in summary or f["DTSTART"][:10] < TODAY.isoformat():
+            continue
+        out.append(Event(
+            title=summary,
+            start=f["DTSTART"],
+            end=None,
+            venue=f.get("LOCATION") or "Praha",
+            url=f.get("URL", "https://pyvo.cz/praha-pyvo/"),
+            source="pyvo",
+            category="Meetup",
+        ))
+    return out
+
+
+def next_months(n: int) -> list[tuple[int, int]]:
+    """(rok, měsíc) pro aktuální a n-1 následujících měsíců."""
+    return [((TODAY.month - 1 + i) // 12 + TODAY.year, (TODAY.month - 1 + i) % 12 + 1) for i in range(n)]
+
+
+def cvut() -> list[Event]:
+    """ČVUT – centrální kalendář akcí všech fakult (RSS s vlastním polem <datum>)."""
+    r = session.get("https://akce.cvut.cz/?node=rss&lang=cz", timeout=30)
+    r.raise_for_status()
+    x = BeautifulSoup(r.content, "html.parser")
+    out = []
+    for it in x.find_all("item"):
+        d = parse_cz_range(it.datum.get_text()) if it.datum else None
+        if not d:
+            continue
+        desc = BeautifulSoup(it.description.get_text(), "html.parser") if it.description else None
+        em = desc.find("em") if desc else None
+        # <em>25.09.2026, 17.00 - 22.00, FJFI ČVUT, Břehová 7</em>
+        parts = [clean(x) for x in em.get_text().split(",")] if em else []
+        times = re.findall(r"(\d{1,2})\.(\d{2})", parts[1]) if len(parts) > 2 and re.match(r"\d{1,2}\.\d{2}", parts[1]) else []
+        place = ", ".join(parts[2 if times else 1:]) or "ČVUT"
+        if "Děčín" in place:  # detašované pracoviště mimo Prahu
+            continue
+        single = not d[1] or d[1] == d[0]
+        link = it.find("guid") or it.find("link")
+        out.append(Event(
+            title=clean(it.title.get_text()),
+            start=f"{d[0].isoformat()}T{int(times[0][0]):02d}:{times[0][1]}" if times and single else d[0].isoformat(),
+            end=(f"{d[0].isoformat()}T{int(times[1][0]):02d}:{times[1][1]}" if len(times) > 1 else None) if single else d[1].isoformat(),
+            venue=place,
+            url=clean(link.get_text()) if link else "https://akce.cvut.cz/",
+            source="cvut",
+            category=clean(it.category.get_text()) if it.category else None,
+        ))
+    return out
+
+
+def fel() -> list[Event]:
+    """FEL ČVUT – přednášky, Noc vědy, dny otevřených dveří fakulty."""
+    s = get("https://fel.cvut.cz/cs/aktualne/akce")
+    out = []
+    for it in s.select("a.event-item__inner"):
+        title = it.select_one(".event-item__title")
+        dt = it.select_one(".event-item__date")
+        d = parse_cz_range(dt.get_text(" ")) if dt else None
+        if not title or not d:
+            continue
+        out.append(Event(
+            title=clean(title.get_text()),
+            start=d[0].isoformat(),
+            end=d[1].isoformat() if d[1] and d[1] != d[0] else None,
+            venue="FEL ČVUT",
+            url=urljoin("https://fel.cvut.cz/", it["href"]),
+            source="fel",
+        ))
+    return out
+
+
+def cuni() -> list[Event]:
+    """Univerzita Karlova – celouniverzitní kalendář akcí (?month=&year=)."""
+    out = []
+    for y, m in next_months(3):
+        s = get(f"https://cuni.cz/uk-5068.html?month={m}&year={y}")
+        for e in s.select("div.event[data-day]"):
+            title = e.select_one(".event-title")
+            if not title or not e.get("data-year"):
+                continue
+            d = date(int(e["data-year"]), int(e["data-month"]), int(e["data-day"]))
+            tm = e.select_one(".event-time")
+            times = re.findall(r"\d{1,2}:\d{2}", tm.get_text()) if tm else []
+            loc = e.select_one(".event-location")
+            a = title.find("a") or e.find("a", class_="thumbnail")
             out.append(Event(
-                title=clean(a.get_text()),
-                start=d[0].isoformat(),
-                end=d[1].isoformat() if d[1] and d[1] != d[0] else None,
-                venue=clean(venue.get_text()) if venue else "Praha",
-                url=a["href"],
-                source="pragueeu",
-                category=clean(cat.get_text()) if cat else "Výstava",
+                title=clean(title.get_text()),
+                start=with_time(d, times[0] if times else None),
+                end=with_time(d, times[1]) if len(times) > 1 else None,
+                venue=clean(loc.get_text()) if loc else "Univerzita Karlova",
+                url=urljoin("https://cuni.cz/", a["href"]) if a and a.get("href") else "https://cuni.cz/uk-5068.html",
+                source="cuni",
             ))
-        if len(tiles) < 20 or not s.find("a", href=re.compile(rf"pg={pg + 1}")):
-            break
+    return out
+
+
+def mff() -> list[Event]:
+    """Matfyz (MFF UK) – iCal export kalendáře akcí po měsících."""
+    out = []
+    for y, m in next_months(3):
+        r = session.get("https://www.mff.cuni.cz/cs/web-events/ical", params={"year": y, "month": m}, timeout=30)
+        r.raise_for_status()
+        for f in parse_ics(r.text):
+            end = f.get("DTEND")
+            if end and end[:10] != f["DTSTART"][:10]:  # vícedenní -> jen data
+                start, end = f["DTSTART"][:10], end[:10]
+            else:
+                start = f["DTSTART"]
+            out.append(Event(
+                title=f.get("SUMMARY", ""),
+                start=start,
+                end=end,
+                venue=f.get("LOCATION") or "MFF UK",
+                url=f.get("URL") or "https://www.mff.cuni.cz/cs/verejnost/kalendar-akci",
+                source="mff",
+            ))
+        time.sleep(1)
+    return out
+
+
+def ffuk() -> list[Event]:
+    """Filozofická fakulta UK – akce „pro veřejnost“ (přednášky, dny jazyků…)."""
+    s = get("https://www.ff.cuni.cz/udalosti/pro-verejnost/")
+    out = []
+    for h in s.select("header.entry-header"):
+        a = h.select_one(".entry-title a")
+        dt = h.select_one(".entry-meta.date")
+        d = parse_cz_range(dt.get_text()) if dt else None
+        if not a or not d:
+            continue
+        times = re.findall(r"\d{1,2}:\d{2}", dt.get_text())
+        multi = d[1] and d[1] != d[0]
+        out.append(Event(
+            title=clean(a.get_text()),
+            start=d[0].isoformat() if multi else with_time(d[0], times[0] if times else None),
+            end=d[1].isoformat() if multi else (with_time(d[0], times[1]) if len(times) > 1 else None),
+            venue="Filozofická fakulta UK",
+            url=a["href"],
+            source="ffuk",
+            category="Přednáška",
+        ))
     return out
 
 
@@ -540,7 +785,9 @@ def goout() -> list[Event]:
 
 ADAPTERS = [biooko, jatka78, nzm, dox, vystaviste, praha7,
             studiohrdinu, crossclub, trznice, forumkarlin,
-            planetarium, ngprague, ntm, pragueeu, lafabrika, goout]
+            planetarium, ngprague, ntm, pragueeu, lafabrika, goout,
+            opendays, festivaly, luma, camp, pyvo,
+            cvut, fel, cuni, mff, ffuk]
 
 
 # ---------------------------------------------------------------- dedup + výstup

@@ -10,6 +10,8 @@
     --s-studiohrdinu: #b8327a; --s-crossclub: #4d7c0f; --s-trznice: #a16207; --s-forumkarlin: #0e7490;
     --s-planetarium: #4338ca; --s-ngprague: #9f1239; --s-ntm: #475569; --s-pragueeu: #be185d;
     --s-lafabrika: #ea580c; --s-stvanice: #0284c7; --s-vnitroblock: #65a30d;
+    --s-opendays: #059669; --s-festivaly: #c026d3; --s-luma: #7c3aed; --s-camp: #0891b2; --s-pyvo: #ca8a04;
+    --s-cvut: #0065bd; --s-fel: #1d4ed8; --s-cuni: #8b1538; --s-mff: #b45309; --s-ffuk: #6d28d9;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -35,7 +37,11 @@
   .seg { display: inline-flex; } .seg button { border-radius: 0; } .seg button:first-child { border-radius: 8px 0 0 8px; }
   .seg button:last-child { border-radius: 0 8px 8px 0; }
   .spacer { flex: 1; }
-  #filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+  #filters { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0; }
+  .fgroup { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .fgroup h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+               margin: 0 4px 0 0; min-width: 170px; }
+  .fgroup .all { font-size: 12px; padding: 3px 10px; border-radius: 999px; }
   #filters label { display: inline-flex; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--line);
                    border-radius: 999px; padding: 3px 10px; cursor: pointer; user-select: none; }
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
@@ -104,8 +110,17 @@ const SOURCES = {
   dox: "DOX", vystaviste: "Výstaviště", praha7: "Praha 7 (MČ)",
   studiohrdinu: "Studio Hrdinů", crossclub: "Cross Club", trznice: "Holešovická tržnice", forumkarlin: "Forum Karlín",
   planetarium: "Planetárium", ngprague: "Národní galerie", ntm: "Technické muzeum", pragueeu: "prague.eu výstavy",
-  lafabrika: "La Fabrika", stvanice: "Štvanice", vnitroblock: "Vnitroblock"
+  lafabrika: "La Fabrika", stvanice: "Štvanice", vnitroblock: "Vnitroblock",
+  opendays: "Dny otevřených dveří", festivaly: "Festivaly", luma: "Luma (tech/AI)", camp: "CAMP (architektura)",
+  pyvo: "Pyvo (Python)", cvut: "ČVUT", fel: "FEL ČVUT", cuni: "Univerzita Karlova", mff: "Matfyz", ffuk: "FF UK"
 };
+// skupiny zdrojů – divadla a kina lze vypnout jedním klikem
+const GROUPS = [
+  ["Objevování a vzdělávání", ["opendays", "festivaly", "camp", "cvut", "fel", "cuni", "mff", "ffuk", "luma", "pyvo",
+                               "ntm", "nzm", "planetarium", "ngprague",
+                               "dox", "pragueeu", "vystaviste", "trznice", "stvanice", "vnitroblock", "praha7"]],
+  ["Kultura", ["jatka78", "lafabrika", "studiohrdinu", "biooko", "crossclub", "forumkarlin"]],
+];
 const LONG_DAYS = 7; // akce delší než týden (výstavy) nezahlcují kalendář, jsou nahoře zvlášť
 
 const pad = n => String(n).padStart(2, "0");
@@ -140,17 +155,28 @@ function eventsOn(day) {
 function renderFilters() {
   const counts = {};
   events.forEach(e => counts[e.source] = (counts[e.source] || 0) + 1);
-  document.getElementById("filters").innerHTML = Object.keys(counts).map(s => `
-    <label><input type="checkbox" data-s="${s}" ${state.off.includes(s) ? "" : "checked"}>
-    <span class="dot" style="background:${color(s)}"></span>${esc(SOURCES[s] || s)} <small>(${counts[s]})</small></label>`).join("");
-  document.querySelectorAll("#filters input").forEach(i => i.onchange = () => {
-    state.off = [...document.querySelectorAll("#filters input")].filter(x => !x.checked).map(x => x.dataset.s);
-    render();
+  const grouped = new Set(GROUPS.flatMap(g => g[1]));
+  const groups = [...GROUPS, ["Ostatní", Object.keys(counts).filter(s => !grouped.has(s))]]
+    .map(([name, srcs]) => [name, srcs.filter(s => counts[s])]).filter(([, srcs]) => srcs.length);
+  const el = document.getElementById("filters");
+  el.innerHTML = groups.map(([name, srcs], gi) => `<div class="fgroup"><h2>${esc(name)}</h2>` +
+    srcs.map(s => `<label><input type="checkbox" data-s="${s}" ${state.off.includes(s) ? "" : "checked"}>
+      <span class="dot" style="background:${color(s)}"></span>${esc(SOURCES[s] || s)} <small>(${counts[s]})</small></label>`).join("") +
+    `<button class="all" data-g="${gi}">${srcs.every(s => state.off.includes(s)) ? "Zapnout vše" : "Vypnout vše"}</button></div>`).join("");
+  el.querySelectorAll("input").forEach(i => i.onchange = () => {
+    state.off = [...el.querySelectorAll("input")].filter(x => !x.checked).map(x => x.dataset.s);
+    renderFilters(); render();
+  });
+  el.querySelectorAll(".all").forEach(b => b.onclick = () => {
+    const srcs = groups[b.dataset.g][1], allOff = srcs.every(s => state.off.includes(s));
+    state.off = allOff ? state.off.filter(s => !srcs.includes(s)) : [...new Set([...state.off, ...srcs])];
+    renderFilters(); render();
   });
 }
 
 function renderLong(from, to) {
-  const list = visible().filter(e => e.long && e.s <= to && e.en >= from);
+  const rank = e => ["opendays", "festivaly", "camp"].includes(e.source) ? 0 : 1;
+  const list = visible().filter(e => e.long && e.s <= to && e.en >= from).sort((a, b) => rank(a) - rank(b));
   const el = document.getElementById("long");
   el.hidden = !list.length;
   const f = d => d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });

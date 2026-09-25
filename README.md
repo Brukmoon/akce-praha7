@@ -28,6 +28,15 @@ start web\index.html      # otevře kalendář
 | prague.eu – výstavy (celá Praha) | HTML (`div.tile-switching`) |
 | La Fabrika | HTML (`.programRow`), datum a čas z URL |
 | Štvanice, Vnitroblock | GoOut JSON API (`/services/entities/v1/schedules?venueIds[]=`) |
+| prague.eu – dny otevřených dveří, festivaly | HTML (`div.tile-switching`) |
+| Luma (tech/AI meetupy) | JSON API `api.lu.ma/discover/get-paginated-events` |
+| CAMP (architektura, prohlídky města) | HTML (`time[datetime]` v kartách) |
+| Pražské Pyvo | iCal `pyvo.cz/api/pyvo.ics` |
+| ČVUT (všechny fakulty) | RSS `akce.cvut.cz/?node=rss` |
+| FEL ČVUT | HTML (`a.event-item__inner`) |
+| Univerzita Karlova | HTML `div.event[data-day]`, `?month=&year=` |
+| Matfyz (MFF UK) | iCal `mff.cuni.cz/cs/web-events/ical?year=&month=` |
+| Filozofická fakulta UK | HTML (`header.entry-header`) |
 
 Nový zdroj = nová funkce vracející `list[Event]` + přidat ji do `ADAPTERS`
 a barvu `--s-<jméno>` / název do `SOURCES` v `web/index.html`.
