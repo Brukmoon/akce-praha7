@@ -1,0 +1,232 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Akce Praha 7</title>
+<style>
+  :root {
+    --bg: #f7f6f3; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e4e2dd;
+    --accent: #c8102e; --today: #fff4d6;
+    --s-biooko: #2a6fdb; --s-jatka78: #c8102e; --s-nzm: #2e8b57; --s-dox: #7a3cc2;
+    --s-vystaviste: #d97706; --s-praha7: #0f766e;
+    --s-studiohrdinu: #b8327a; --s-crossclub: #4d7c0f; --s-trznice: #a16207; --s-forumkarlin: #0e7490;
+    --s-planetarium: #4338ca; --s-ngprague: #9f1239; --s-ntm: #475569; --s-pragueeu: #be185d;
+    --s-lafabrika: #ea580c; --s-stvanice: #0284c7; --s-vnitroblock: #65a30d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #151517; --panel: #1e1e21; --text: #ececef; --muted: #9a9aa2; --line: #2e2e33;
+      --today: #3a3220;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #151517; --panel: #1e1e21; --text: #ececef; --muted: #9a9aa2; --line: #2e2e33;
+    --today: #3a3220;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+           padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  #label { font-weight: 600; font-size: 16px; min-width: 180px; text-transform: capitalize; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+  button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .seg { display: inline-flex; } .seg button { border-radius: 0; } .seg button:first-child { border-radius: 8px 0 0 8px; }
+  .seg button:last-child { border-radius: 0 8px 8px 0; }
+  .spacer { flex: 1; }
+  #filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+  #filters label { display: inline-flex; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--line);
+                   border-radius: 999px; padding: 3px 10px; cursor: pointer; user-select: none; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  main { padding: 12px 16px 40px; }
+  #long { margin-bottom: 12px; }
+  #long summary { cursor: pointer; color: var(--muted); }
+  #long ul { margin: 6px 0 0; padding-left: 18px; }
+
+  /* měsíc */
+  .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--line); gap: 1px; }
+  .dow { background: var(--panel); padding: 6px 8px; font-weight: 600; color: var(--muted); font-size: 12px; }
+  .cell { background: var(--panel); min-height: 110px; padding: 4px 6px; overflow: hidden; }
+  .cell.out { opacity: .45; }
+  .cell.today { background: var(--today); }
+  .num { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .ev { display: flex; gap: 5px; align-items: baseline; font-size: 12px; padding: 1px 0; color: inherit; text-decoration: none;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ev:hover .t { text-decoration: underline; }
+  .ev .tm { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .ev .t { overflow: hidden; text-overflow: ellipsis; }
+  .more { font-size: 12px; color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; }
+
+  /* týden */
+  .week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .day { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 200px; }
+  .day.today { background: var(--today); }
+  .day h3 { margin: 0 0 6px; font-size: 13px; text-transform: capitalize; }
+  .card { display: block; border-left: 3px solid; padding: 4px 6px; margin-bottom: 6px; border-radius: 4px;
+          background: color-mix(in srgb, var(--panel) 90%, var(--text)); color: inherit; text-decoration: none; }
+  .card:hover { filter: brightness(.97); }
+  .card .tm { font-size: 12px; font-weight: 600; }
+  .card .t { font-size: 13px; }
+  .card .v { font-size: 11px; color: var(--muted); }
+
+  @media (max-width: 800px) {
+    .week { grid-template-columns: 1fr; }
+    .day { min-height: 0; }
+    .cell { min-height: 64px; }
+    .ev .t { display: none; } .ev .tm { display: none; }
+    .cell .evs { display: flex; flex-wrap: wrap; gap: 3px; }
+    .ev { padding: 0; }
+  }
+  footer { color: var(--muted); font-size: 12px; padding: 0 16px 24px; }
+</style>
+<header>
+  <h1>Akce Praha 7</h1>
+  <div class="seg"><button id="vMonth">Měsíc</button><button id="vWeek">Týden</button></div>
+  <button id="prev" aria-label="Předchozí">‹</button>
+  <button id="todayBtn">Dnes</button>
+  <button id="next" aria-label="Další">›</button>
+  <span id="label"></span>
+  <span class="spacer"></span>
+</header>
+<div id="filters"></div>
+<main>
+  <details id="long"></details>
+  <div id="view"></div>
+</main>
+<footer id="foot"></footer>
+
+<script src="events.js"></script>
+<script>
+const DATA = window.EVENTS_DATA || { events: [] };
+const SOURCES = {
+  biooko: "Bio Oko", jatka78: "Jatka78", nzm: "Zemědělské muzeum",
+  dox: "DOX", vystaviste: "Výstaviště", praha7: "Praha 7 (MČ)",
+  studiohrdinu: "Studio Hrdinů", crossclub: "Cross Club", trznice: "Holešovická tržnice", forumkarlin: "Forum Karlín",
+  planetarium: "Planetárium", ngprague: "Národní galerie", ntm: "Technické muzeum", pragueeu: "prague.eu výstavy",
+  lafabrika: "La Fabrika", stvanice: "Štvanice", vnitroblock: "Vnitroblock"
+};
+const LONG_DAYS = 7; // akce delší než týden (výstavy) nezahlcují kalendář, jsou nahoře zvlášť
+
+const pad = n => String(n).padStart(2, "0");
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parse = s => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = d => addDays(d, -((d.getDay() + 6) % 7));
+const color = s => `var(--s-${s}, #888)`;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// stav (pamatuje si pohled a filtry)
+let state = { view: "month", cursor: ymd(new Date()), off: [] };
+try { Object.assign(state, JSON.parse(localStorage.getItem("akce7") || "{}")); } catch {}
+if (location.hash === "#tyden") state.view = "week";
+const save = () => {
+  try { localStorage.setItem("akce7", JSON.stringify({ view: state.view, off: state.off })); } catch {}
+};
+
+// rozdělení akcí na jednodenní a dlouhodobé
+const events = DATA.events.map(e => {
+  const s = parse(e.start), en = e.end ? parse(e.end) : s;
+  return { ...e, s, en, time: e.start.length > 10 ? e.start.slice(11, 16) : "", long: (en - s) / 864e5 > LONG_DAYS };
+});
+const visible = () => events.filter(e => !state.off.includes(e.source));
+
+function eventsOn(day) {
+  const k = ymd(day);
+  return visible().filter(e => !e.long && ymd(e.s) <= k && k <= ymd(e.en))
+    .sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+}
+
+function renderFilters() {
+  const counts = {};
+  events.forEach(e => counts[e.source] = (counts[e.source] || 0) + 1);
+  document.getElementById("filters").innerHTML = Object.keys(counts).map(s => `
+    <label><input type="checkbox" data-s="${s}" ${state.off.includes(s) ? "" : "checked"}>
+    <span class="dot" style="background:${color(s)}"></span>${esc(SOURCES[s] || s)} <small>(${counts[s]})</small></label>`).join("");
+  document.querySelectorAll("#filters input").forEach(i => i.onchange = () => {
+    state.off = [...document.querySelectorAll("#filters input")].filter(x => !x.checked).map(x => x.dataset.s);
+    render();
+  });
+}
+
+function renderLong(from, to) {
+  const list = visible().filter(e => e.long && e.s <= to && e.en >= from);
+  const el = document.getElementById("long");
+  el.hidden = !list.length;
+  const f = d => d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });
+  el.innerHTML = `<summary>Probíhající výstavy a dlouhodobé akce (${list.length})</summary><ul>` +
+    list.map(e => `<li><span class="dot" style="background:${color(e.source)}"></span>
+      <a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a> – ${esc(e.venue)}, ${f(e.s)} – ${f(e.en)}</li>`).join("") + "</ul>";
+}
+
+function evLine(e) {
+  return `<a class="ev" href="${esc(e.url)}" target="_blank" rel="noopener" title="${esc(e.title + " – " + e.venue)}">
+    <span class="dot" style="background:${color(e.source)}"></span>
+    ${e.time ? `<span class="tm">${e.time}</span>` : ""}<span class="t">${esc(e.title)}</span></a>`;
+}
+
+function renderMonth() {
+  const cur = parse(state.cursor);
+  const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+  const last = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+  const start = mondayOf(first), today = ymd(new Date());
+  document.getElementById("label").textContent = first.toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
+  renderLong(first, last);
+  let html = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"].map(d => `<div class="dow">${d}</div>`).join("");
+  for (let d = start; d <= last || d.getDay() !== 1; d = addDays(d, 1)) {
+    const evs = eventsOn(d), MAX = 5;
+    html += `<div class="cell ${d.getMonth() !== first.getMonth() ? "out" : ""} ${ymd(d) === today ? "today" : ""}">
+      <div class="num">${d.getDate()}</div><div class="evs">${evs.slice(0, MAX).map(evLine).join("")}</div>
+      ${evs.length > MAX ? `<button class="more" data-d="${ymd(d)}">+${evs.length - MAX} dalších</button>` : ""}</div>`;
+  }
+  const v = document.getElementById("view");
+  v.innerHTML = `<div class="grid">${html}</div>`;
+  v.querySelectorAll(".more").forEach(b => b.onclick = () => { state.view = "week"; state.cursor = b.dataset.d; render(); });
+}
+
+function renderWeek() {
+  const mon = mondayOf(parse(state.cursor)), sun = addDays(mon, 6), today = ymd(new Date());
+  const f = (d, o) => d.toLocaleDateString("cs-CZ", o);
+  document.getElementById("label").textContent =
+    `${f(mon, { day: "numeric", month: "numeric" })} – ${f(sun, { day: "numeric", month: "numeric", year: "numeric" })}`;
+  renderLong(mon, sun);
+  let html = "";
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(mon, i);
+    html += `<div class="day ${ymd(d) === today ? "today" : ""}"><h3>${f(d, { weekday: "long", day: "numeric", month: "numeric" })}</h3>` +
+      (eventsOn(d).map(e => `<a class="card" style="border-color:${color(e.source)}" href="${esc(e.url)}" target="_blank" rel="noopener">
+        ${e.time ? `<div class="tm">${e.time}</div>` : ""}<div class="t">${esc(e.title)}</div>
+        <div class="v">${esc(e.venue)}${e.category ? " · " + esc(e.category) : ""}${e.price ? " · " + esc(e.price) : ""}</div></a>`).join("")
+        || `<small style="color:var(--muted)">nic</small>`) + "</div>";
+  }
+  document.getElementById("view").innerHTML = `<div class="week">${html}</div>`;
+}
+
+function render() {
+  document.getElementById("vMonth").classList.toggle("on", state.view === "month");
+  document.getElementById("vWeek").classList.toggle("on", state.view === "week");
+  state.view === "week" ? renderWeek() : renderMonth();
+  save();
+}
+
+function shift(dir) {
+  const d = parse(state.cursor);
+  state.cursor = ymd(state.view === "week" ? addDays(d, 7 * dir) : new Date(d.getFullYear(), d.getMonth() + dir, 1));
+  render();
+}
+document.getElementById("vMonth").onclick = () => { state.view = "month"; render(); };
+document.getElementById("vWeek").onclick = () => { state.view = "week"; render(); };
+document.getElementById("prev").onclick = () => shift(-1);
+document.getElementById("next").onclick = () => shift(1);
+document.getElementById("todayBtn").onclick = () => { state.cursor = ymd(new Date()); render(); };
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft") shift(-1);
+  if (e.key === "ArrowRight") shift(1);
+});
+
+document.getElementById("foot").textContent = DATA.generated
+  ? `Data aktualizována ${new Date(DATA.generated).toLocaleString("cs-CZ")} · ${events.length} akcí`
+  : "Žádná data – spusť python scrape.py";
+renderFilters();
+render();
+</script>
