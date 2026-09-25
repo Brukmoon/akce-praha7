@@ -574,7 +574,7 @@ def main() -> int:
     if not events:  # nepublikovat prázdný kalendář, když selže všechno
         print("Žádné akce – nic neukládám.", file=sys.stderr)
         return 1
-    data = {"generated": datetime.now().isoformat(timespec="minutes"),
+    data = {"generated": datetime.now(PRAGUE).isoformat(timespec="minutes"),
             "events": [asdict(e) for e in events]}
     OUT_DIR.mkdir(exist_ok=True)
     js = json.dumps(data, ensure_ascii=False, indent=1)
